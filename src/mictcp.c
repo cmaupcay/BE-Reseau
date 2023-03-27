@@ -1,6 +1,9 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
+unsigned int next_seq = 0;
+const unsigned long timeout = 100;
+
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'erreur
@@ -52,11 +55,24 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
 	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-	mic_tcp_pdu pdu;
+	mic_tcp_sock_addr addr = {0};
+	mic_tcp_pdu pdu = {0}, pdu_ack = {0};
 	pdu.payload.data = mesg;
 	pdu.payload.size = mesg_size;
-	mic_tcp_sock_addr addr = {0};
-	return IP_send(pdu, addr);
+	pdu.header.seq_num = next_seq;
+	int result = -1, resend = 1;
+	do
+	{
+		result = IP_send(pdu, addr);
+		resend = IP_recv(&pdu_ack, &addr, timeout);
+		if (resend != -1 && pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == pdu.header.seq_num)
+		{
+			next_seq = (next_seq + 1) % 2;
+			resend = 0;
+		}
+	}
+	while (resend != 0);
+	return result;
 }
 
 /*
@@ -68,7 +84,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {
 	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-	mic_tcp_payload payload;
+	mic_tcp_payload payload = {0};
 	payload.data = mesg;
 	payload.size = max_mesg_size;
 	return app_buffer_get(payload);
@@ -94,5 +110,13 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
 	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-	app_buffer_put(pdu.payload);
+	mic_tcp_pdu pdu_ack = {0};
+	pdu_ack.header.ack = 1;
+	if (pdu.header.seq_num == next_seq)
+	{
+		app_buffer_put(pdu.payload);
+		pdu_ack.header.ack_num = next_seq;
+		next_seq = (next_seq + 1) % 2;
+	}
+	IP_send(pdu_ack, addr);
 }
