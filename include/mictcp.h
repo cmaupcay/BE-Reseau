@@ -14,7 +14,6 @@
 #include <pthread.h>
 #include <sys/time.h>
 
-
 /*
  * Etats du protocole (les noms des états sont donnés à titre indicatif
  * et peuvent être modifiés)
