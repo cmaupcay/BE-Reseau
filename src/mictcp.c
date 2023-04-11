@@ -9,7 +9,7 @@ unsigned int fenetres[MICTCP_SOCKETS];
 unsigned int pertes[MICTCP_SOCKETS];
 int socketd = 0;
 
-const unsigned int pertes_admissibles = MICTCP_FENETRE * (100 - MICTCP_FIABILITE);
+const unsigned int pertes_admissibles = (unsigned int)((float)MICTCP_FENETRE * (1.f - (float)MICTCP_FIABILITE / 100.f));
 int current_socket = MICTCP_SOCKETS;
 
 /*
@@ -18,7 +18,7 @@ int current_socket = MICTCP_SOCKETS;
  */
 int mic_tcp_socket(start_mode sm)
 {
-	printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	set_loss_rate(1);
 	if (initialize_components(sm) == -1) return -1;
 	// Recherche d'un descripteur libre.
@@ -56,7 +56,7 @@ int mic_tcp_socket(start_mode sm)
  */
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 {
-	printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (socket >= 0 && socket < socketd)
 	{
 		sockets[socket].addr = addr;
@@ -71,7 +71,7 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
  */
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
-	printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (socket >= 0 && socket < socketd)
 	{
 		connections[socket] = addr;
@@ -87,7 +87,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
  */
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
-	printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (socket >= 0 && socket < socketd)
 	{
 		if (connections[socket] == NULL)
@@ -105,7 +105,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
  */
 int mic_tcp_send (int socket, char* mesg, int mesg_size)
 {
-	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (socket >= 0 && socket < socketd && sockets[socket].state == ESTABLISHED)
 	{
 		mic_tcp_pdu pdu = {
@@ -125,15 +125,15 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 		}, pdu_ack = {0};
 		// Mise à jour du numéro de séquence à émettre.
 		seq_emission[socket] = (seq_emission[socket] + 1) % 2;
-		int result = -1, resend = 1;
+		// Mise à jour de la fenêtre associée au socket.
+		if (++fenetres[socket] >= MICTCP_FENETRE)
+		{
+			fenetres[socket] = 0;
+			pertes[socket] = 0;
+		}
+		int result = -1, resend = 1, perte = 0;
 		do
 		{
-			// Mise à jour de la fenêtre associée au socket.
-			if (++fenetres[socket] >= MICTCP_FENETRE)
-			{
-				fenetres[socket] = 0;
-				pertes[socket] = 0;
-			}
 			pdu_ack.header.ack = 0;
 			pdu_ack.header.ack_num = __UINT32_MAX__;
 			// Envoi du PDU.
@@ -145,12 +145,13 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 				// Si ACK reçu et que la séquence correspond ou que la perte est admissible, arrêt.
 				if (result == 0 && pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq_emission[socket])
 					resend = 0;
-				// Sinon, on enregistre une perte.
-				else
+				// Sinon, on enregistre une nouvelle perte.
+				else if (perte == 0)
 				{
+					perte = 1;
 					pertes[socket]++;
-					// Si on a atteint le nombre de pertes maximales, on renvoit.
-					if (pertes[socket] >= pertes_admissibles)
+					// Si on a atteint le nombre de pertes maximales, on renvoie.
+					if (pertes[socket] > pertes_admissibles)
 						pertes[socket] = 0;
 					// Sinon, on ignore.
 					else resend = 0;
@@ -171,7 +172,7 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
  */
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {
-	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (socket >= 0 && socket < socketd && sockets[socket].state == ESTABLISHED)
 	{
 		mic_tcp_payload payload = {
@@ -192,7 +193,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
  */
 int mic_tcp_close (int socket)
 {
-	printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (socket >= 0 && socket < socketd && sockets[socket].state == ESTABLISHED)
 	{
 		sockets[socket].state = CLOSING;
@@ -215,7 +216,7 @@ int mic_tcp_close (int socket)
  */
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
-	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+	MICTCP_DEBUG_APPEL;
 	if (current_socket < MICTCP_SOCKETS)
 	{
 		mic_tcp_pdu pdu_ack = {
@@ -241,7 +242,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 			app_buffer_put(pdu.payload);
 		// Sinon, on enregistre une perte.
 		// Si on a atteint le nombre de pertes maximales, on réclame la trame.
-		else if (++pertes[current_socket] >= pertes_admissibles)
+		else if (++pertes[current_socket] > pertes_admissibles)
 			pertes[current_socket] = 0;
 		// Sinon, on ignore cette trame;
 		else maj_seq = 0;

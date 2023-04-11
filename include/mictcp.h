@@ -24,10 +24,18 @@
   #define MICTCP_TIMEOUT 250 // ms
 #endif
 #ifndef MICTCP_FENETRE
-  #define MICTCP_FENETRE 5
+  #define MICTCP_FENETRE 30
 #endif
 #ifndef MICTCP_FIABILITE
-  #define MICTCP_FIABILITE 75 // %
+  #define MICTCP_FIABILITE 90 // %
+#endif
+
+// #define MICTCP_DEBUG
+
+#ifdef MICTCP_DEBUG
+  #define MICTCP_DEBUG_APPEL printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n")
+#else
+  #define MICTCP_DEBUG_APPEL
 #endif
 
 /*
