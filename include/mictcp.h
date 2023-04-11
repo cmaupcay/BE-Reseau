@@ -17,11 +17,17 @@
 #ifndef MICTCP_SOCKETS
   #define MICTCP_SOCKETS 16
 #endif
-#ifndef MICTCP_SEQ
-  #define MICTCP_SEQ 0
+#ifndef MICTCP_SEQUENCE_INITIALE
+  #define MICTCP_SEQUENCE_INITIALE 0
 #endif
 #ifndef MICTCP_TIMEOUT
-  #define MICTCP_TIMEOUT 250
+  #define MICTCP_TIMEOUT 250 // ms
+#endif
+#ifndef MICTCP_FENETRE
+  #define MICTCP_FENETRE 5
+#endif
+#ifndef MICTCP_FIABILITE
+  #define MICTCP_FIABILITE 75 // %
 #endif
 
 /*

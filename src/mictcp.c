@@ -5,8 +5,12 @@ mic_tcp_sock sockets[MICTCP_SOCKETS];
 mic_tcp_sock_addr* connections[MICTCP_SOCKETS];
 unsigned int seq_emission[MICTCP_SOCKETS];
 unsigned int seq_reception[MICTCP_SOCKETS];
-unsigned int* current_seq_reception = NULL;
+unsigned int fenetres[MICTCP_SOCKETS];
+unsigned int pertes[MICTCP_SOCKETS];
 int socketd = 0;
+
+const unsigned int pertes_admissibles = MICTCP_FENETRE * (100 - MICTCP_FIABILITE);
+int current_socket = MICTCP_SOCKETS;
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -38,8 +42,11 @@ int mic_tcp_socket(start_mode sm)
 		connections[d] = NULL;
 	}
 	// Initialisation des numéros de séquence.
-	seq_emission[d] = MICTCP_SEQ;
-	seq_reception[d] = MICTCP_SEQ;
+	seq_emission[d] = MICTCP_SEQUENCE_INITIALE;
+	seq_reception[d] = MICTCP_SEQUENCE_INITIALE;
+	// Initialisation des pertes;
+	fenetres[d] = 0;
+	pertes[d] = 0;
 	return d;
 }
 
@@ -121,6 +128,12 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 		int result = -1, resend = 1;
 		do
 		{
+			// Mise à jour de la fenêtre associée au socket.
+			if (++fenetres[socket] >= MICTCP_FENETRE)
+			{
+				fenetres[socket] = 0;
+				pertes[socket] = 0;
+			}
 			pdu_ack.header.ack = 0;
 			pdu_ack.header.ack_num = __UINT32_MAX__;
 			// Envoi du PDU.
@@ -129,9 +142,19 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 			{
 				// Attente du ACK.
 				result = IP_recv(&pdu_ack, connections[socket], MICTCP_TIMEOUT);
-				// Si ACK reçu et que la séquence correspond, arrêt.
+				// Si ACK reçu et que la séquence correspond ou que la perte est admissible, arrêt.
 				if (result == 0 && pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq_emission[socket])
 					resend = 0;
+				// Sinon, on enregistre une perte.
+				else
+				{
+					pertes[socket]++;
+					// Si on a atteint le nombre de pertes maximales, on renvoit.
+					if (pertes[socket] >= pertes_admissibles)
+						pertes[socket] = 0;
+					// Sinon, on ignore.
+					else resend = 0;
+				}
 			}
 		}
 		while (resend == 1);
@@ -155,8 +178,8 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 			.data = mesg,
 			.size = max_mesg_size
 		};
-		// Définition du numéro de séquence à utiliser.
-		current_seq_reception = &seq_reception[socket];
+		// Définition du descripteur du socket de réception.
+		current_socket = socket;
 		return app_buffer_get(payload);
 	}
 	return -1;
@@ -193,26 +216,40 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
 	printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-	if (current_seq_reception)
+	if (current_socket < MICTCP_SOCKETS)
 	{
 		mic_tcp_pdu pdu_ack = {
 			.header = {
 				.source_port = pdu.header.dest_port,
 				.dest_port = pdu.header.source_port,
 				.seq_num = __UINT32_MAX__,
-				.ack_num = *current_seq_reception,
+				.ack_num = seq_reception[current_socket],
 				.syn = 0,
 				.ack = 1,
 				.fin = 0
 			}
 		};
-		// Si la séquence est celle attendue, traitement.
-		if (pdu.header.seq_num == *current_seq_reception)
+		// Mise à jour de la fenêtre associée au socket.
+		if (++fenetres[current_socket] >= MICTCP_FENETRE)
 		{
+			fenetres[current_socket] = 0;
+			pertes[current_socket] = 0;
+		}
+		int maj_seq = 1;
+		// Si la séquence est celle attendue, envoi dans le buffer.
+		if (pdu.header.seq_num == seq_reception[current_socket])
 			app_buffer_put(pdu.payload);
+		// Sinon, on enregistre une perte.
+		// Si on a atteint le nombre de pertes maximales, on réclame la trame.
+		else if (++pertes[current_socket] >= pertes_admissibles)
+			pertes[current_socket] = 0;
+		// Sinon, on ignore cette trame;
+		else maj_seq = 0;
+		if (maj_seq)
+		{
 			// Mise à jour du numéro de la séquence attendue.
-			*current_seq_reception = (*current_seq_reception + 1) % 2;
-			pdu_ack.header.ack_num = *current_seq_reception;
+			seq_reception[current_socket] = (seq_reception[current_socket] + 1) % 2;
+			pdu_ack.header.ack_num = seq_reception[current_socket];
 		}
 		IP_send(pdu_ack, addr);
 	}
