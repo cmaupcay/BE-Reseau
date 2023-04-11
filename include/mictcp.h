@@ -14,6 +14,16 @@
 #include <pthread.h>
 #include <sys/time.h>
 
+#ifndef MICTCP_SOCKETS
+  #define MICTCP_SOCKETS 16
+#endif
+#ifndef MICTCP_SEQ
+  #define MICTCP_SEQ 0
+#endif
+#ifndef MICTCP_TIMEOUT
+  #define MICTCP_TIMEOUT 250
+#endif
+
 /*
  * Etats du protocole (les noms des états sont donnés à titre indicatif
  * et peuvent être modifiés)
