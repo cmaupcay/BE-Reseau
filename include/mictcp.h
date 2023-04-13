@@ -17,20 +17,21 @@
 #ifndef MICTCP_SOCKETS
   #define MICTCP_SOCKETS 16
 #endif
-#ifndef MICTCP_SEQUENCE_INITIALE
-  #define MICTCP_SEQUENCE_INITIALE 0
+#ifndef MICTCP_INITIAL_SEQ
+  #define MICTCP_INITIAL_SEQ 0
 #endif
 #ifndef MICTCP_TIMEOUT
-  #define MICTCP_TIMEOUT 250 // ms
+  #define MICTCP_TIMEOUT 100 // ms
 #endif
-#ifndef MICTCP_FENETRE
-  #define MICTCP_FENETRE 5
+#ifndef MICTCP_WINDOW
+  #define MICTCP_WINDOW 5
 #endif
-#ifndef MICTCP_FIABILITE
-  #define MICTCP_FIABILITE 80.0 // %
+#ifndef MICTCP_RELIABILITY
+  #define MICTCP_RELIABILITY 80.0 // %
 #endif
 
 // #define MICTCP_DEBUG
+#define MICTCP_DEBUG_RELIABILITY
 
 #ifdef MICTCP_DEBUG
   #define MICTCP_DEBUG_APPEL printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n")

@@ -10,7 +10,11 @@ unsigned int window_loss[MICTCP_SOCKETS];
 int socketd = 0;
 int current_socket = MICTCP_SOCKETS;
 
-const unsigned int MAX_WINDOW_LOSS = (unsigned int)((double)MICTCP_FENETRE * (1.0 - (MICTCP_FIABILITE / 100.1)));
+const unsigned int WINDOW_LOSS_MAX = (unsigned int)((double)MICTCP_WINDOW * (1.0 - (MICTCP_RELIABILITY / 100.1)));
+
+#ifdef MICTCP_DEBUG_RELIABILITY
+	unsigned int sent = 0, lost = 0, resent = 0;
+#endif
 
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -19,7 +23,7 @@ const unsigned int MAX_WINDOW_LOSS = (unsigned int)((double)MICTCP_FENETRE * (1.
 int mic_tcp_socket(start_mode sm)
 {
 	MICTCP_DEBUG_APPEL;
-	set_loss_rate(2);
+	set_loss_rate(1);
 	if (initialize_components(sm) == -1) return -1;
 	// Recherche d'un descripteur libre.
 	int d;
@@ -37,8 +41,8 @@ int mic_tcp_socket(start_mode sm)
 	sockets[d].fd = d;
 	sockets[d].state = IDLE;
 	// Initialisation des numéros de séquence.
-	seq_send[d] = MICTCP_SEQUENCE_INITIALE;
-	seq_recv[d] = MICTCP_SEQUENCE_INITIALE;
+	seq_send[d] = MICTCP_INITIAL_SEQ;
+	seq_recv[d] = MICTCP_INITIAL_SEQ;
 	// Initialisation des pertes.
 	window[d] = 0;
 	window_loss[d] = 0;
@@ -118,12 +122,15 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 		}, pdu_ack = {0};
 		// Mise à jour du numéro de séquence à émettre.
 		seq_send[socket] = (seq_send[socket] + 1) % 2;
-		// Mise à jour de la fenêtre associée au socket.
-		if (++window[socket] >= MICTCP_FENETRE)
+		// Mise à jour des pertes.
+		if (++window[socket] >= MICTCP_WINDOW)
 		{
 			window[socket] = 0;
 			window_loss[socket] = 0;
 		}
+		#ifdef MICTCP_DEBUG_RELIABILITY
+			sent++;
+		#endif
 		int result = -1, resend = 1, perte = 0;
 		do
 		{
@@ -143,8 +150,12 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 				{
 					perte = 1;
 					// Si la perte est admissible, on l'ignore.
-					if (++window_loss[socket] <= MAX_WINDOW_LOSS)
+					if (++window_loss[socket] <= WINDOW_LOSS_MAX)
 						resend = 0;
+					#ifdef MICTCP_DEBUG_RELIABILITY
+						lost++;
+						if (resend) resent++;
+					#endif
 				}
 			}
 		}
@@ -187,6 +198,12 @@ int mic_tcp_close (int socket)
 	if (socket >= 0 && socket < socketd && sockets[socket].state == ESTABLISHED)
 	{
 		sockets[socket].state = CLOSING;
+		#ifdef MICTCP_DEBUG_RELIABILITY
+			if (sent > 0)
+				printf(	"%d sent, %d lost (%f%c), %d resent (%f%c).",
+						sent, lost, ((double)lost / (double) sent) * 100.0, '%',
+						resent, ((double)resent / (double)lost) * 100.0, '%');
+		#endif
 		sockets[socket].state = CLOSED;
 		return 0;
 	}
@@ -215,8 +232,8 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 				.fin = 0
 			}
 		};
-		// Mise à jour de la fenêtre associée au socket.
-		if (++window[current_socket] >= MICTCP_FENETRE)
+		// Mise à jour des pertes.
+		if (++window[current_socket] >= MICTCP_WINDOW)
 		{
 			window[current_socket] = 0;
 			window_loss[current_socket] = 0;
@@ -225,9 +242,8 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 		// Si la séquence est celle attendue, envoi dans le buffer.
 		if (pdu.header.seq_num == seq_recv[current_socket])
 			app_buffer_put(pdu.payload);
-		// Sinon, on enregistre une perte.
-		// Si elle est admissible, on l'ignore.
-		else if (++window_loss[current_socket] <= MAX_WINDOW_LOSS)
+		// Sinon, on enregistre une perte. Si elle est admissible, on l'ignore.
+		else if (++window_loss[current_socket] <= WINDOW_LOSS_MAX)
 			maj_seq = 0;
 		// Passage à la séquence suivante.
 		if (maj_seq)
