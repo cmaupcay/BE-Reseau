@@ -24,10 +24,10 @@
   #define MICTCP_TIMEOUT 250 // ms
 #endif
 #ifndef MICTCP_FENETRE
-  #define MICTCP_FENETRE 30
+  #define MICTCP_FENETRE 5
 #endif
 #ifndef MICTCP_FIABILITE
-  #define MICTCP_FIABILITE 90 // %
+  #define MICTCP_FIABILITE 80.0 // %
 #endif
 
 // #define MICTCP_DEBUG

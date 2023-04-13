@@ -58,6 +58,12 @@ distclean:
 
 $(foreach bdir,$(BUILD_DIR),$(eval $(call make-goal,$(bdir))))
 
+video.starwars:
+	@-cd video && ln -fs video_starwars.bin video.bin
+
+video.wildlife:
+	@-cd video && ln -fs video_wildlife.bin video.bin
+
 dist:
 	@tar --exclude=build --exclude=*tar.gz --exclude=.git* -czvf mictcp-bundle.tar.gz ../mictcp
 
