@@ -8,6 +8,7 @@ ifneq ($(tag),)
 endif
 
 CC        := gcc
+CFLAGS	  := -std=gnu99 -Wall -g
 LD        := gcc
 
 TAR_FILENAME := $(DATE)-mictcp-$(TAG).tar.gz
@@ -27,7 +28,8 @@ vpath %.c $(SRC_DIR)
 
 define make-goal
 $1/%.o: %.c
-	$(CC) -DAPI_CS_Port=$(PORT) -DAPI_SC_Port=$(PORT2) -std=gnu99 -Wall -g -I $(INCLUDES) -c $$< -o $$@
+	@echo $(CFLAGS)
+	$(CC) -DAPI_CS_Port=$(PORT) -DAPI_SC_Port=$(PORT2) $(CFLAGS) -I $(INCLUDES) -c $$< -o $$@
 endef
 
 .PHONY: all checkdirs clean
@@ -55,7 +57,6 @@ distclean:
 	@rm -rf $(BUILD_DIR)
 	@-rm -f *.tar.gz || true
 
-
 $(foreach bdir,$(BUILD_DIR),$(eval $(call make-goal,$(bdir))))
 
 video.starwars:
@@ -63,6 +64,15 @@ video.starwars:
 
 video.wildlife:
 	@-cd video && ln -fs video_wildlife.bin video.bin
+
+debug:
+	@-$(MAKE) clean all CFLAGS+=-DMICTCP_DEBUG
+
+debug.functions:
+	@-$(MAKE) clean all CFLAGS+=-DMICTCP_DEBUG_FUNCTIONS
+
+debug.reliability:
+	@-$(MAKE) clean all CFLAGS+=-DMICTCP_DEBUG_RELIABILITY
 
 dist:
 	@tar --exclude=build --exclude=*tar.gz --exclude=.git* -czvf mictcp-bundle.tar.gz ../mictcp

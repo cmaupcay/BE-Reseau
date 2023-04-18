@@ -1,0 +1,18 @@
+#!/bin/bash
+
+FLAGS="-DMICTCP_DEBUG_RELIABILITY -DMICTCP_DEBUG_LOSS -DMICTCP_DEBUG_REJECTED"
+LOSS_RATE_MIN=1
+LOSS_RATE_MAX=3
+VIDEOS=("starwars" "wildlife")
+
+for loss in $(seq ${LOSS_RATE_MIN} ${LOSS_RATE_MAX});
+do
+    echo Compiling for loss rate at ${loss}...
+    make debug.reliability CFLAGS+="-DMICTCP_LOSS_RATE=${loss} ${FLAGS}" > /dev/null
+
+    for video in ${VIDEOS[*]};
+    do
+        make video.${video}
+        echo Testing ${video} with loss rate at ${loss}... & ./tsock_video -p -t mictcp & ./tsock_video -s -t mictcp
+    done
+done

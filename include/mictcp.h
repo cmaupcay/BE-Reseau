@@ -14,6 +14,12 @@
 #include <pthread.h>
 #include <sys/time.h>
 
+#ifndef MICTCP_LOSS_RATE
+  #define MICTCP_LOSS_RATE 1
+#endif
+
+// CONFIGURATION
+
 #ifndef MICTCP_SOCKETS
   #define MICTCP_SOCKETS 16
 #endif
@@ -24,19 +30,25 @@
   #define MICTCP_TIMEOUT 100 // ms
 #endif
 #ifndef MICTCP_WINDOW
-  #define MICTCP_WINDOW 5
+  #define MICTCP_WINDOW 32
 #endif
 #ifndef MICTCP_RELIABILITY
-  #define MICTCP_RELIABILITY 80.0 // %
+  #define MICTCP_RELIABILITY 80 // %
 #endif
 
-// #define MICTCP_DEBUG
-#define MICTCP_DEBUG_RELIABILITY
+// DEBUG
 
 #ifdef MICTCP_DEBUG
-  #define MICTCP_DEBUG_APPEL printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n")
+  #define MICTCP_DEBUG_FUNCTIONS
+  #define MICTCP_DEBUG_RELIABILITY
+  #define MICTCP_DEBUG_LOSS
+  #define MICTCP_DEBUG_REJECTED
+#endif
+
+#ifdef MICTCP_DEBUG_FUNCTIONS
+  #define MICTCP_DEBUG_FUNCTION printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n")
 #else
-  #define MICTCP_DEBUG_APPEL
+  #define MICTCP_DEBUG_FUNCTION
 #endif
 
 /*
