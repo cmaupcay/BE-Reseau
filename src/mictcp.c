@@ -1,5 +1,6 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
+#include <limits.h>
 
 mic_tcp_sock sockets[MICTCP_SOCKETS];
 mic_tcp_sock_addr connections[MICTCP_SOCKETS];
@@ -9,7 +10,7 @@ unsigned int loss_distance[MICTCP_SOCKETS];
 int socketd = 0;
 int current_socket = MICTCP_SOCKETS;
 
-const unsigned int LOSS_DISTANCE_MAX = (unsigned int)((double)MICTCP_WINDOW * (1.0 - (double)MICTCP_RELIABILITY / 100.0));
+const unsigned int LOSS_DISTANCE_MAX = MICTCP_RELIABILITY > 0 ? (unsigned int)((double)MICTCP_WINDOW * (1.0 - (double)MICTCP_RELIABILITY / 100.01)) : UINT_MAX;
 
 #ifdef MICTCP_DEBUG_RELIABILITY
 	unsigned int sent = 0, lost = 0, resent = 0;
@@ -136,7 +137,7 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 			{
 				// Attente du ACK.
 				result = IP_recv(&pdu_ack, &connections[socket], MICTCP_TIMEOUT);
-				// Si ACK reçu et que la séquence correspond ou que la perte est admissible, arrêt.
+				// Si ACK reçu et que la séquence correspond, arrêt.
 				if (result == 0)
 				{
 					if (pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq_send[socket])
@@ -145,19 +146,23 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 						else printf("ACK#%d packet rejected.\n", pdu_ack.header.ack_num);
 					#endif
 				}
-				// Sinon, on enregistre une nouvelle perte.
-				else if (perte == 0)
+				// Sinon, on enregistre une perte.
+				else
 				{
-					perte = 1;
-					// Si la perte n'est pas admissible, on réinitialise les pertes.
-					#if MICTCP_RELIABILITY > 0
-						if (loss_distance[socket] > LOSS_DISTANCE_MAX)
-							loss_distance[socket] = 0;
-						// Sinon, on l'ignore.
-						else resend = 0;
-					#else
-						resend = 0;
-					#endif
+					// Si c'est la première perte pour ce paquet, on défini si on doit le renvoyer.
+					if (perte == 0)
+					{
+						perte = 1;
+						// Si la perte n'est pas admissible, on réinitialise la distance de perte.
+						#if MICTCP_RELIABILITY > 0
+							if (loss_distance[socket] > LOSS_DISTANCE_MAX)
+								loss_distance[socket] = 0;
+							// Sinon, on l'ignore.
+							else resend = 0;
+						#else
+							resend = 0;
+						#endif
+					}
 					#ifdef MICTCP_DEBUG_LOSS
 						printf("Lost packet ");
 						printf(resend == 0 ? "ignored" : "resent");
