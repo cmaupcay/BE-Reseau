@@ -20,28 +20,38 @@
 
 // CONFIGURATION
 
+// Nombre de sockets pouvant être gérés simultanément.
 #ifndef MICTCP_SOCKETS
   #define MICTCP_SOCKETS 16
 #endif
+// Numéro de séquence initiale.
 #ifndef MICTCP_INITIAL_SEQ
   #define MICTCP_INITIAL_SEQ 0
 #endif
+// Temps maximal d'attente de réception d'un ACK après un envoi.
 #ifndef MICTCP_TIMEOUT
   #define MICTCP_TIMEOUT 100 // ms
 #endif
+// Taille de la fenêtre de détection de perte.
 #ifndef MICTCP_WINDOW
-  #define MICTCP_WINDOW 32
+  #define MICTCP_WINDOW 30 // paquets / images
 #endif
+// Fiabilité partielle statique.
 #ifndef MICTCP_RELIABILITY
   #define MICTCP_RELIABILITY 80 // %
 #endif
 
 // DEBUG
 
+// Activation de tous les éléments de débogage.
 #ifdef MICTCP_DEBUG
+  // Affichage des appels de fonctions.
   #define MICTCP_DEBUG_FUNCTIONS
+  // Affichage des statistiques de fiabilité à la fermeture d'une connexion.
   #define MICTCP_DEBUG_RELIABILITY
+  // Affichage des détections de perte.
   #define MICTCP_DEBUG_LOSS
+  // Affichage des rejets de paquets.
   #define MICTCP_DEBUG_REJECTED
 #endif
 

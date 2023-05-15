@@ -164,7 +164,7 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 						#endif
 					}
 					#ifdef MICTCP_DEBUG_LOSS
-						printf("Lost packet ");
+						printf("Lost packet #%d ", pdu.header.seq_num);
 						printf(resend == 0 ? "ignored" : "resent");
 						printf(".\n");
 					#endif
@@ -216,9 +216,11 @@ int mic_tcp_close (int socket)
 		sockets[socket].state = CLOSING;
 		#ifdef MICTCP_DEBUG_RELIABILITY
 			if (sent > 0)
-				printf(	"%d sent, %d lost (%f%c), %d resent (%f%c).",
-						sent, lost, ((double)lost / (double) sent) * 100.0, '%',
-						resent, ((double)resent / (double)lost) * 100.0, '%');
+				printf(	"%d sent, %d lost (lost / send = %f%c), %d resent (resent / lost = %f%c) -> 1 - (lost - resent) / sent = %f%c\n",
+						sent, lost, ((double)lost / (double)sent) * 100.0, '%',
+						resent, ((double)resent / (double)lost) * 100.0, '%',
+						(1.0 - ((double)(lost - resent) / (double)sent)) * 100.0, '%'
+					);
 		#endif
 		sockets[socket].state = CLOSED;
 		return 0;

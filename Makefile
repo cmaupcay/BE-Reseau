@@ -24,6 +24,8 @@ OBJ_SERV  := $(patsubst build/apps/gateway.o,,$(patsubst build/apps/client.o,,$(
 OBJ_GWAY  := $(patsubst build/apps/server.o,,$(patsubst build/apps/client.o,,$(OBJ)))
 INCLUDES  := include
 
+TEST 	  := ./tsock_test
+
 vpath %.c $(SRC_DIR)
 
 define make-goal
@@ -73,6 +75,9 @@ debug.functions:
 
 debug.reliability:
 	@-$(MAKE) clean all CFLAGS+=-DMICTCP_DEBUG_RELIABILITY
+
+test:
+	@-clear && $(TEST)
 
 dist:
 	@tar --exclude=build --exclude=*tar.gz --exclude=.git* -czvf mictcp-bundle.tar.gz ../mictcp
