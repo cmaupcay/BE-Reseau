@@ -29,8 +29,16 @@
   #define MICTCP_INITIAL_SEQ 0
 #endif
 // Temps maximal d'attente de réception d'un ACK après un envoi.
-#ifndef MICTCP_TIMEOUT
-  #define MICTCP_TIMEOUT 100 // ms
+#ifndef MICTCP_TIMEOUT_ACK
+  #define MICTCP_TIMEOUT_ACK 100 // ms
+#endif
+// Temps maximal d'attente de réception d'un SYN de connexion.
+#ifndef MICTCP_TIMEOUT_CONNECT
+  #define MICTCP_TIMEOUT_CONNECT 5000 // ms
+#endif
+// Temps maximal d'attente de réception d'un ACK après un envoi.
+#ifndef MICTCP_TIMEOUT_ACK
+  #define MICTCP_TIMEOUT_ACK 100 // ms
 #endif
 // Taille de la fenêtre de détection de perte.
 #ifndef MICTCP_WINDOW
@@ -39,6 +47,10 @@
 // Fiabilité partielle statique.
 #ifndef MICTCP_RELIABILITY
   #define MICTCP_RELIABILITY 80 // %
+#endif
+// Tentatives de connexion maximales.
+#ifndef MICTCP_RETRIES
+  #define MICTCP_RETRIES 3 // %
 #endif
 
 // DEBUG
@@ -53,6 +65,8 @@
   #define MICTCP_DEBUG_LOSS
   // Affichage des rejets de paquets.
   #define MICTCP_DEBUG_REJECTED
+  // Affichage d'un message à l'établissement d'une connexion'.
+  #define MICTCP_DEBUG_CONNECTION
 #endif
 
 #ifdef MICTCP_DEBUG_FUNCTIONS

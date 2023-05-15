@@ -2,14 +2,20 @@
 #include <api/mictcp_core.h>
 #include <limits.h>
 
+// Sockets.
 mic_tcp_sock sockets[MICTCP_SOCKETS];
+// Adresses distantes.
 mic_tcp_sock_addr connections[MICTCP_SOCKETS];
-unsigned int seq_send[MICTCP_SOCKETS];
-unsigned int seq_recv[MICTCP_SOCKETS];
+// Numéros de séquence.
+unsigned int seq[MICTCP_SOCKETS];
+// Distances de perte.
 unsigned int loss_distance[MICTCP_SOCKETS];
+// Descripteur du prochain socket.
 int socketd = 0;
+// Socket sélectionné.
 int current_socket = MICTCP_SOCKETS;
 
+// Distance maximale de perte.
 const unsigned int LOSS_DISTANCE_MAX = MICTCP_RELIABILITY > 0 ? (unsigned int)((double)MICTCP_WINDOW * (1.0 - (double)MICTCP_RELIABILITY / 100.01)) : UINT_MAX;
 
 #ifdef MICTCP_DEBUG_RELIABILITY
@@ -41,8 +47,7 @@ int mic_tcp_socket(start_mode sm)
 	sockets[d].fd = d;
 	sockets[d].state = IDLE;
 	// Initialisation des numéros de séquence.
-	seq_send[d] = MICTCP_INITIAL_SEQ;
-	seq_recv[d] = MICTCP_INITIAL_SEQ;
+	seq[d] = MICTCP_INITIAL_SEQ;
 	// Initialisation des pertes.
 	loss_distance[d] = 0;
 	return d;
@@ -70,11 +75,58 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
 	MICTCP_DEBUG_FUNCTION;
-	if (socket >= 0 && socket < socketd)
+	if (socket >= 0 && socket < socketd && sockets[socket].state == IDLE)
 	{
-		connections[socket] = *addr;
-		sockets[socket].state = ESTABLISHED;
-		return 0;
+		// Attente d'un SYN.
+		mic_tcp_pdu pdu_remote = {0};
+		int result = -1;
+		do result = IP_recv(&pdu_remote, addr, MICTCP_TIMEOUT_CONNECT * MICTCP_RETRIES);
+		while (result < 0);
+		if (result >= 0 && pdu_remote.header.syn == 1)
+		{
+			sockets[socket].state = SYN_RECEIVED;
+			// Définition du numéro de séquence.
+			seq[socket] = (pdu_remote.header.seq_num + 1) % 2;
+			// Envoi du SYN ACK.
+			mic_tcp_pdu pdu = {
+				.header = {
+					.source_port = sockets[socket].addr.port,
+					.dest_port = addr->port,
+					.seq_num = pdu_remote.header.seq_num,
+					.ack_num = seq[socket],
+					.syn = 1,
+					.ack = 1,
+					.fin = 0
+				},
+				.payload.size = 0
+			};
+			do
+			{
+				result = IP_send(pdu, *addr);
+				if (result >= 0)
+				{
+					// Attente du ACK.
+					result = IP_recv(&pdu_remote, addr, MICTCP_TIMEOUT_ACK);
+					if (result <= 0)
+					{
+						if (pdu.header.ack == 1 && pdu.header.ack_num == seq[socket])
+						{
+							// Connexion établie.
+							connections[socket] = *addr;
+							sockets[socket].state = ESTABLISHED;
+							#ifdef MICTCP_DEBUG_CONNECTION
+								printf("Connection established.\n");
+							#endif
+							return 0;
+						}
+						#ifdef MICTCP_DEBUG_REJECTED
+							else printf("Packet #%d rejected.\n", pdu.header.ack_num);
+						#endif
+					}
+				}
+			}
+			while (result < 0);
+		}
 	}
 	return -1;
 }
@@ -86,11 +138,53 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
 	MICTCP_DEBUG_FUNCTION;
-	if (socket >= 0 && socket < socketd)
+	if (socket >= 0 && socket < socketd && sockets[socket].state == IDLE)
 	{
-		connections[socket] = addr;
-		sockets[socket].state = ESTABLISHED;
-		return 0;
+		mic_tcp_pdu pdu = {
+			.header = {
+				.source_port = sockets[socket].addr.port,
+				.dest_port = addr.port,
+				.seq_num = seq[socket],
+				.ack_num = __UINT32_MAX__,
+				.syn = 1,
+				.ack = 0,
+				.fin = 0
+			},
+			.payload.size = 0
+		}, pdu_ack = {0};
+		// Mise à jour du numéro de séquence.
+		seq[socket] = (seq[socket] + 1) % 2;
+		// Envoi du SYN.
+		sockets[socket].state = SYN_SENT;
+		int tries = 0, result = -1;
+		do
+		{
+			result = IP_send(pdu, addr);
+			// Attente du SYN ACK.
+			if (result >= 0) result = IP_recv(&pdu_ack, &addr, MICTCP_TIMEOUT_CONNECT);
+		}
+		while (result < 0 && ++tries < MICTCP_RETRIES);
+		if (result >= 0)
+		{
+			if (pdu_ack.header.syn == 1 && pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq[socket])
+			{
+				// Envoi du ACK.
+				pdu.header.seq_num = seq[socket];
+				pdu.header.ack_num = seq[socket];
+				pdu.header.syn = 0;
+				pdu.header.ack = 1;
+				do result = IP_send(pdu, addr);
+				while (result < 0);
+				// Connexion établie.
+				connections[socket] = addr;
+				sockets[socket].state = ESTABLISHED;
+				#ifdef MICTCP_DEBUG_CONNECTION
+					printf("Connection established.\n");
+				#endif
+				return 0;
+			}
+			else printf("Connection refused.\n");
+		}
 	}
 	return -1;
 }
@@ -108,7 +202,7 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 			.header = {
 				.source_port = sockets[socket].addr.port,
 				.dest_port = connections[socket].port,
-				.seq_num = seq_send[socket],
+				.seq_num = seq[socket],
 				.ack_num = __UINT32_MAX__,
 				.syn = 0,
 				.ack = 0,
@@ -119,8 +213,8 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 				.size = mesg_size
 			}
 		}, pdu_ack = {0};
-		// Mise à jour du numéro de séquence à émettre.
-		seq_send[socket] = (seq_send[socket] + 1) % 2;
+		// Mise à jour du numéro de séquence.
+		seq[socket] = (seq[socket] + 1) % 2;
 		// Mise à jour des pertes.
 		loss_distance[socket]++;
 		#ifdef MICTCP_DEBUG_RELIABILITY
@@ -136,11 +230,11 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 			if (result == mesg_size)
 			{
 				// Attente du ACK.
-				result = IP_recv(&pdu_ack, &connections[socket], MICTCP_TIMEOUT);
+				result = IP_recv(&pdu_ack, &connections[socket], MICTCP_TIMEOUT_ACK);
 				// Si ACK reçu et que la séquence correspond, arrêt.
 				if (result == 0)
 				{
-					if (pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq_send[socket])
+					if (pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq[socket])
 						resend = 0;
 					#ifdef MICTCP_DEBUG_REJECTED
 						else printf("ACK#%d packet rejected.\n", pdu_ack.header.ack_num);
@@ -223,6 +317,9 @@ int mic_tcp_close (int socket)
 					);
 		#endif
 		sockets[socket].state = CLOSED;
+		#ifdef MICTCP_DEBUG_CONNECTION
+			printf("Connection closed.\n");
+		#endif
 		return 0;
 	}
 	return -1;
@@ -237,26 +334,26 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
 	MICTCP_DEBUG_FUNCTION;
-	if (current_socket < MICTCP_SOCKETS)
+	if (current_socket < MICTCP_SOCKETS && sockets[current_socket].state == ESTABLISHED)
 	{
 		mic_tcp_pdu pdu_ack = {
 			.header = {
 				.source_port = pdu.header.dest_port,
 				.dest_port = pdu.header.source_port,
 				.seq_num = __UINT32_MAX__,
-				.ack_num = seq_recv[current_socket],
+				.ack_num = seq[current_socket],
 				.syn = 0,
 				.ack = 1,
 				.fin = 0
 			}
 		};
 		// Si la séquence est celle attendue, traitement de la trame.
-		if (pdu.header.seq_num == seq_recv[current_socket])
+		if (pdu.header.seq_num == seq[current_socket])
 		{
 			app_buffer_put(pdu.payload);
 			// Passage à la séquence suivante.
-			seq_recv[current_socket] = (seq_recv[current_socket] + 1) % 2;
-			pdu_ack.header.ack_num = seq_recv[current_socket];
+			seq[current_socket] = (seq[current_socket] + 1) % 2;
+			pdu_ack.header.ack_num = seq[current_socket];
 		}
 		#ifdef MICTCP_DEBUG_REJECTED
 			else printf("Packet #%d rejected.\n", pdu.header.seq_num);
@@ -264,4 +361,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 		// Envoi du ACK.
 		IP_send(pdu_ack, addr);
 	}
+	#ifdef MICTCP_DEBUG_REJECTED
+		else printf("Packet #%d ignored.\n", pdu.header.seq_num);
+	#endif
 }
