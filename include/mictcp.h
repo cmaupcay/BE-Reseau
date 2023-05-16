@@ -22,7 +22,7 @@
 
 // Nombre de sockets pouvant être gérés simultanément.
 #ifndef MICTCP_SOCKETS
-  #define MICTCP_SOCKETS 16
+  #define MICTCP_SOCKETS 8
 #endif
 // Numéro de séquence initiale.
 #ifndef MICTCP_INITIAL_SEQ
@@ -34,7 +34,7 @@
 #endif
 // Temps maximal d'attente de réception d'un SYN de connexion.
 #ifndef MICTCP_TIMEOUT_CONNECT
-  #define MICTCP_TIMEOUT_CONNECT 5000 // ms
+  #define MICTCP_TIMEOUT_CONNECT 1000 // ms
 #endif
 // Temps maximal d'attente de réception d'un ACK après un envoi.
 #ifndef MICTCP_TIMEOUT_ACK
@@ -42,11 +42,15 @@
 #endif
 // Taille de la fenêtre de détection de perte.
 #ifndef MICTCP_WINDOW
-  #define MICTCP_WINDOW 30 // paquets / images
+  #define MICTCP_WINDOW 30 // paquets
 #endif
-// Fiabilité partielle statique.
+// Fiabilité partielle proposée par le serveur.
 #ifndef MICTCP_RELIABILITY
   #define MICTCP_RELIABILITY 80 // %
+#endif
+// Fiabilité partielle par défaut.
+#ifndef MICTCP_RELIABILITY_DEFAULT
+  #define MICTCP_RELIABILITY_DEFAULT 100 // %
 #endif
 // Tentatives de connexion maximales.
 #ifndef MICTCP_RETRIES
@@ -58,15 +62,29 @@
 // Activation de tous les éléments de débogage.
 #ifdef MICTCP_DEBUG
   // Affichage des appels de fonctions.
-  #define MICTCP_DEBUG_FUNCTIONS
+  #ifndef MICTCP_DEBUG_FUNCTIONS
+    #define MICTCP_DEBUG_FUNCTIONS
+  #endif
   // Affichage des statistiques de fiabilité à la fermeture d'une connexion.
-  #define MICTCP_DEBUG_RELIABILITY
+  #ifndef MICTCP_DEBUG_RELIABILITY
+    #define MICTCP_DEBUG_RELIABILITY
+  #endif
+  // Affichage des étapes de négociation de la fiabilité partielle.
+  #ifndef MICTCP_DEBUG_RELIABILITY_DEFINITION
+    #define MICTCP_DEBUG_RELIABILITY_DEFINITION
+  #endif
   // Affichage des détections de perte.
-  #define MICTCP_DEBUG_LOSS
+  #ifndef MICTCP_DEBUG_LOSS
+    #define MICTCP_DEBUG_LOSS
+  #endif
   // Affichage des rejets de paquets.
-  #define MICTCP_DEBUG_REJECTED
+  #ifndef MICTCP_DEBUG_REJECTED
+    #define MICTCP_DEBUG_REJECTED
+  #endif
   // Affichage d'un message à l'établissement d'une connexion'.
-  #define MICTCP_DEBUG_CONNECTION
+  #ifndef MICTCP_DEBUG_CONNECTION
+    #define MICTCP_DEBUG_CONNECTION
+  #endif
 #endif
 
 #ifdef MICTCP_DEBUG_FUNCTIONS

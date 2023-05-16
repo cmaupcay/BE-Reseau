@@ -23,10 +23,6 @@ Pour tester le protocole, utilisez la commande ```make test```, qui utilise le s
 
 Pour changer la vidéo par défaut (_```video/video.bin```_), vous pouvez utiliser les commandes ```make video.starwars``` et ```make video.wildlife```.
 
-<!-- ### PDF -->
-
-<!-- Pour générer le PDF d'explication, utilisez la recette ```make pdf```. -->
-
 ### Debug
 
 Pour modifier le niveau de débogage du protocole, vous pouvez utiliser les recettes suivantes :

@@ -8,6 +8,8 @@ mic_tcp_sock sockets[MICTCP_SOCKETS];
 mic_tcp_sock_addr connections[MICTCP_SOCKETS];
 // Numéros de séquence.
 unsigned int seq[MICTCP_SOCKETS];
+// Distance maximale de perte.
+unsigned int loss_distance_max[MICTCP_SOCKETS];
 // Distances de perte.
 unsigned int loss_distance[MICTCP_SOCKETS];
 // Descripteur du prochain socket.
@@ -15,8 +17,34 @@ int socketd = 0;
 // Socket sélectionné.
 int current_socket = MICTCP_SOCKETS;
 
-// Distance maximale de perte.
-const unsigned int LOSS_DISTANCE_MAX = MICTCP_RELIABILITY > 0 ? (unsigned int)((double)MICTCP_WINDOW * (1.0 - (double)MICTCP_RELIABILITY / 100.01)) : UINT_MAX;
+// Prépare la charge utile d'un PDU à recevoir un pourcentage de fiabilité partielle.
+static void prepare_for_reliability(mic_tcp_pdu* pdu)
+{
+	pdu->payload.size = 2;
+	pdu->payload.data = (char*)malloc(2);
+	pdu->payload.data[1] = 0;
+}
+// Écris un pourcentage de fiabilité partielle dans la charge utile d'un PDU.
+static void export_reliability(mic_tcp_pdu* pdu, char reliability)
+{
+	prepare_for_reliability(pdu);
+	pdu->payload.data[0] = reliability;
+}
+// Lis un pourcentage de fiabilité partielle dans la charge utile d'un PDU.
+static char import_reliability(mic_tcp_pdu* pdu)
+{
+	if (pdu->payload.size > 0)
+	{
+		const char reliability = pdu->payload.data[0];
+		if (reliability >= 0 && reliability <= 100)
+			return reliability;
+	}
+	return MICTCP_RELIABILITY_DEFAULT;
+}
+
+// Évalue une distance maximale de perte admissible depuis un pourcentage de fiabilité.
+static unsigned int loss_distance_max_from_reliability(char reliability)
+{ return reliability > 0 ? (unsigned int)((float)MICTCP_WINDOW * (1.0f - (float)reliability / 100.f)) : UINT_MAX; }
 
 #ifdef MICTCP_DEBUG_RELIABILITY
 	unsigned int sent = 0, lost = 0, resent = 0;
@@ -48,7 +76,8 @@ int mic_tcp_socket(start_mode sm)
 	sockets[d].state = IDLE;
 	// Initialisation des numéros de séquence.
 	seq[d] = MICTCP_INITIAL_SEQ;
-	// Initialisation des pertes.
+	// Initialisation des distances de perte.
+	loss_distance_max[d] = 0; 
 	loss_distance[d] = 0;
 	return d;
 }
@@ -77,56 +106,75 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 	MICTCP_DEBUG_FUNCTION;
 	if (socket >= 0 && socket < socketd && sockets[socket].state == IDLE)
 	{
-		// Attente d'un SYN.
-		mic_tcp_pdu pdu_remote = {0};
+		mic_tcp_pdu pdu = {
+			.header = {
+				.source_port = sockets[socket].addr.port,
+				.dest_port = addr->port,
+				.seq_num = UINT_MAX,
+				.ack_num = seq[socket],
+				.syn = 1,
+				.ack = 1,
+				.fin = 0
+			}
+		}, pdu_remote = {0};
+		prepare_for_reliability(&pdu_remote);
 		int result = -1;
-		do result = IP_recv(&pdu_remote, addr, MICTCP_TIMEOUT_CONNECT * MICTCP_RETRIES);
-		while (result < 0);
-		if (result >= 0 && pdu_remote.header.syn == 1)
+		do
 		{
-			sockets[socket].state = SYN_RECEIVED;
-			// Définition du numéro de séquence.
-			seq[socket] = (pdu_remote.header.seq_num + 1) % 2;
-			// Envoi du SYN ACK.
-			mic_tcp_pdu pdu = {
-				.header = {
-					.source_port = sockets[socket].addr.port,
-					.dest_port = addr->port,
-					.seq_num = pdu_remote.header.seq_num,
-					.ack_num = seq[socket],
-					.syn = 1,
-					.ack = 1,
-					.fin = 0
-				},
-				.payload.size = 0
-			};
-			do
+			sockets[socket].state = IDLE;
+			// Attente d'un SYN.
+			result = IP_recv(&pdu_remote, addr, MICTCP_TIMEOUT_CONNECT * MICTCP_RETRIES);
+			if (result >= 0 && pdu_remote.header.syn == 1)
 			{
-				result = IP_send(pdu, *addr);
-				if (result >= 0)
+				sockets[socket].state = SYN_RECEIVED;
+				// Récupération du pourcentage de fiabilité partielle.
+				const char reliability = import_reliability(&pdu_remote);
+				loss_distance_max[socket] = loss_distance_max_from_reliability(reliability);
+				#ifdef MICTCP_DEBUG_RELIABILITY_DEFINITION
+					printf("Reliability set to %d%c (loss distance : %u).\n", reliability, '%', loss_distance_max[socket]);
+				#endif
+				// Définition du numéro de séquence.
+				pdu.header.seq_num = pdu_remote.header.seq_num;
+				pdu.header.ack_num = (pdu_remote.header.seq_num + 1) % 2;
+				seq[socket] = pdu.header.ack_num;
+				// Envoi du SYN ACK.
+				export_reliability(&pdu, reliability);
+				do
 				{
-					// Attente du ACK.
-					result = IP_recv(&pdu_remote, addr, MICTCP_TIMEOUT_ACK);
-					if (result <= 0)
+					result = IP_send(pdu, *addr);
+					if (result == pdu.payload.size)
 					{
-						if (pdu.header.ack == 1 && pdu.header.ack_num == seq[socket])
+						// Attente du ACK.
+						result = IP_recv(&pdu_remote, addr, MICTCP_TIMEOUT_ACK);
+						if (result >= 0)
 						{
-							// Connexion établie.
-							connections[socket] = *addr;
-							sockets[socket].state = ESTABLISHED;
-							#ifdef MICTCP_DEBUG_CONNECTION
-								printf("Connection established.\n");
-							#endif
-							return 0;
+							if (pdu.header.ack == 1 && pdu.header.ack_num == seq[socket])
+							{
+								// Connexion établie.
+								connections[socket] = *addr;
+								sockets[socket].state = ESTABLISHED;
+								#ifdef MICTCP_DEBUG_CONNECTION
+									printf("Connection established.\n");
+								#endif
+								result = 0;
+							}
+							else
+							{
+								result = -1;
+								#ifdef MICTCP_DEBUG_REJECTED
+									printf("Packet #%d rejected.\n", pdu.header.ack_num);
+								#endif
+							}
 						}
-						#ifdef MICTCP_DEBUG_REJECTED
-							else printf("Packet #%d rejected.\n", pdu.header.ack_num);
-						#endif
 					}
 				}
+				while (result < 0);
+				free(pdu.payload.data);
 			}
-			while (result < 0);
 		}
+		while (result < 0);
+		free(pdu_remote.payload.data);
+		return result;
 	}
 	return -1;
 }
@@ -145,13 +193,19 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 				.source_port = sockets[socket].addr.port,
 				.dest_port = addr.port,
 				.seq_num = seq[socket],
-				.ack_num = __UINT32_MAX__,
+				.ack_num = UINT_MAX,
 				.syn = 1,
 				.ack = 0,
 				.fin = 0
 			},
 			.payload.size = 0
 		}, pdu_ack = {0};
+		// Proposition du pourcentage de fiabilité partielle.
+		export_reliability(&pdu, MICTCP_RELIABILITY);
+		#ifdef MICTCP_DEBUG_RELIABILITY_DEFINITION
+			printf("Setting reliability proposal to %u%c...\n", MICTCP_RELIABILITY, '%');
+		#endif
+		prepare_for_reliability(&pdu_ack);
 		// Mise à jour du numéro de séquence.
 		seq[socket] = (seq[socket] + 1) % 2;
 		// Envoi du SYN.
@@ -161,30 +215,45 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 		{
 			result = IP_send(pdu, addr);
 			// Attente du SYN ACK.
-			if (result >= 0) result = IP_recv(&pdu_ack, &addr, MICTCP_TIMEOUT_CONNECT);
+			if (result >= 0)
+			{
+				result = IP_recv(&pdu_ack, &addr, MICTCP_TIMEOUT_CONNECT);
+				if (result >= 0)
+				{
+					if (pdu_ack.header.syn == 1 && pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq[socket])
+					{
+						const char reliability = import_reliability(&pdu_ack);
+						if (reliability == MICTCP_RELIABILITY)
+						{
+							// Application de la valeur finale de fiabilité partielle.
+							loss_distance_max[socket] = loss_distance_max_from_reliability(reliability);
+							#ifdef MICTCP_DEBUG_RELIABILITY_DEFINITION
+								printf("Confirmed reliability to %u%c (loss distance : %u).\n", reliability, '%', loss_distance_max[socket]);
+							#endif
+							// Envoi du ACK.
+							pdu.header.seq_num = seq[socket];
+							pdu.header.ack_num = seq[socket];
+							pdu.header.syn = 0;
+							pdu.header.ack = 1;
+							do result = IP_send(pdu, addr);
+							while (result < 0);
+							// Connexion établie.
+							connections[socket] = addr;
+							sockets[socket].state = ESTABLISHED;
+							#ifdef MICTCP_DEBUG_CONNECTION
+								printf("Connection established.\n");
+							#endif
+							result = 0;
+						}
+					}
+					else printf("Connection refused.\n");
+				}
+			}
 		}
 		while (result < 0 && ++tries < MICTCP_RETRIES);
-		if (result >= 0)
-		{
-			if (pdu_ack.header.syn == 1 && pdu_ack.header.ack == 1 && pdu_ack.header.ack_num == seq[socket])
-			{
-				// Envoi du ACK.
-				pdu.header.seq_num = seq[socket];
-				pdu.header.ack_num = seq[socket];
-				pdu.header.syn = 0;
-				pdu.header.ack = 1;
-				do result = IP_send(pdu, addr);
-				while (result < 0);
-				// Connexion établie.
-				connections[socket] = addr;
-				sockets[socket].state = ESTABLISHED;
-				#ifdef MICTCP_DEBUG_CONNECTION
-					printf("Connection established.\n");
-				#endif
-				return 0;
-			}
-			else printf("Connection refused.\n");
-		}
+		free(pdu.payload.data);
+		free(pdu_ack.payload.data);
+		return result < 0 ? -1 : 0;
 	}
 	return -1;
 }
@@ -203,7 +272,7 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 				.source_port = sockets[socket].addr.port,
 				.dest_port = connections[socket].port,
 				.seq_num = seq[socket],
-				.ack_num = __UINT32_MAX__,
+				.ack_num = UINT_MAX,
 				.syn = 0,
 				.ack = 0,
 				.fin = 0
@@ -224,7 +293,7 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 		do
 		{
 			pdu_ack.header.ack = 0;
-			pdu_ack.header.ack_num = __UINT32_MAX__;
+			pdu_ack.header.ack_num = UINT_MAX;
 			// Envoi du PDU.
 			result = IP_send(pdu, connections[socket]);
 			if (result == mesg_size)
@@ -248,14 +317,10 @@ int mic_tcp_send (int socket, char* mesg, int mesg_size)
 					{
 						perte = 1;
 						// Si la perte n'est pas admissible, on réinitialise la distance de perte.
-						#if MICTCP_RELIABILITY > 0
-							if (loss_distance[socket] > LOSS_DISTANCE_MAX)
-								loss_distance[socket] = 0;
-							// Sinon, on l'ignore.
-							else resend = 0;
-						#else
-							resend = 0;
-						#endif
+						if (loss_distance[socket] > loss_distance_max[socket])
+							loss_distance[socket] = 0;
+						// Sinon, on l'ignore.
+						else resend = 0;
 					}
 					#ifdef MICTCP_DEBUG_LOSS
 						printf("Lost packet #%d ", pdu.header.seq_num);
@@ -340,7 +405,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 			.header = {
 				.source_port = pdu.header.dest_port,
 				.dest_port = pdu.header.source_port,
-				.seq_num = __UINT32_MAX__,
+				.seq_num = UINT_MAX,
 				.ack_num = seq[current_socket],
 				.syn = 0,
 				.ack = 1,
